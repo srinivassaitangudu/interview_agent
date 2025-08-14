@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
-Resume Parser for PDF Files
-A comprehensive tool to extract and parse information from PDF resumes.
+Import as:
+
+import backend.resume_parser as barepa
 """
 
 import re
@@ -13,6 +14,8 @@ import pdfplumber
 import PyPDF2
 import nltk
 from dataclasses import dataclass, asdict
+# Add docx support
+from docx import Document
 
 # Download required NLTK data
 try:
@@ -47,6 +50,7 @@ class ResumeData:
     certifications: List[str] = None
     languages: List[str] = None
     raw_text: str = ""
+    file_type: str = ""  # Add file type tracking
     
     def __post_init__(self):
         if self.skills is None:
@@ -64,9 +68,10 @@ class ResumeData:
 
 
 class ResumeParser:
-    """A comprehensive resume parser for PDF files"""
+    """A comprehensive resume parser for PDF and DOCX files"""
     
     def __init__(self):
+        self.supported_formats = ['.pdf', '.docx', '.doc']
         self.skills_keywords = [
             # Programming Languages
             'python', 'java', 'javascript', 'typescript', 'c++', 'c#', 'ruby', 'php',
@@ -97,7 +102,33 @@ class ResumeParser:
             'bachelor', 'master', 'phd', 'doctorate', 'associate', 'diploma',
             'b.s.', 'b.a.', 'm.s.', 'm.a.', 'b.tech', 'm.tech', 'mba', 'md'
         ]
-        
+    
+    def extract_text_from_docx(self, docx_path: str) -> str:
+        """Extract text from DOCX file"""
+        try:
+            doc = Document(docx_path)
+            text = []
+            
+            # Extract text from paragraphs
+            for paragraph in doc.paragraphs:
+                if paragraph.text.strip():
+                    text.append(paragraph.text)
+            
+            # Extract text from tables
+            for table in doc.tables:
+                for row in table.rows:
+                    for cell in row.cells:
+                        if cell.text.strip():
+                            text.append(cell.text)
+            
+            full_text = '\n'.join(text)
+            logger.info(f"Successfully extracted text from DOCX: {docx_path}")
+            return full_text.strip()
+            
+        except Exception as e:
+            logger.error(f"Error extracting text from DOCX {docx_path}: {e}")
+            raise Exception(f"Could not extract text from DOCX: {docx_path}")
+    
     def extract_text_from_pdf(self, pdf_path: str) -> str:
         """Extract text from PDF using multiple methods for better accuracy"""
         text = ""
@@ -127,6 +158,17 @@ class ResumeParser:
                 raise Exception(f"Could not extract text from PDF: {pdf_path}")
         
         return text.strip()
+    
+    def extract_text_from_file(self, file_path: str) -> tuple[str, str]:
+        """Extract text from supported file formats"""
+        file_ext = os.path.splitext(file_path)[1].lower()
+        
+        if file_ext == '.pdf':
+            return self.extract_text_from_pdf(file_path), 'pdf'
+        elif file_ext in ['.docx', '.doc']:
+            return self.extract_text_from_docx(file_path), 'docx'
+        else:
+            raise ValueError(f"Unsupported file format: {file_ext}. Supported formats: {self.supported_formats}")
     
     def extract_contact_info(self, text: str) -> Dict[str, Optional[str]]:
         """Extract contact information from text"""
@@ -303,22 +345,28 @@ class ResumeParser:
         
         return experience
     
-    def parse_resume(self, pdf_path: str) -> ResumeData:
-        """Main method to parse a resume PDF file"""
-        if not os.path.exists(pdf_path):
-            raise FileNotFoundError(f"PDF file not found: {pdf_path}")
+    def parse_resume(self, file_path: str) -> ResumeData:
+        """Main method to parse a resume file (PDF or DOCX)"""
+        if not os.path.exists(file_path):
+            raise FileNotFoundError(f"Resume file not found: {file_path}")
         
-        logger.info(f"Starting to parse resume: {pdf_path}")
+        # Check file format
+        file_ext = os.path.splitext(file_path)[1].lower()
+        if file_ext not in self.supported_formats:
+            raise ValueError(f"Unsupported file format: {file_ext}. Supported formats: {self.supported_formats}")
         
-        # Extract text from PDF
-        text = self.extract_text_from_pdf(pdf_path)
+        logger.info(f"Starting to parse resume: {file_path} (Format: {file_ext})")
+        
+        # Extract text from file
+        text, file_type = self.extract_text_from_file(file_path)
         
         if not text:
-            raise ValueError("No text could be extracted from the PDF")
+            raise ValueError(f"No text could be extracted from the {file_type.upper()} file")
         
         # Create resume data object
         resume_data = ResumeData()
         resume_data.raw_text = text
+        resume_data.file_type = file_type
         
         # Extract various information
         resume_data.name = self.extract_name(text)
@@ -334,7 +382,7 @@ class ResumeParser:
         resume_data.education = self.extract_education(text)
         resume_data.experience = self.extract_experience(text)
         
-        logger.info("Resume parsing completed successfully")
+        logger.info(f"Resume parsing completed successfully (Format: {file_type})")
         return resume_data
     
     def save_to_json(self, resume_data: ResumeData, output_path: str):
@@ -360,7 +408,8 @@ class ResumeParser:
             'portfolio': resume_data.portfolio,
             'skills': ', '.join(resume_data.skills) if resume_data.skills else '',
             'education_count': len(resume_data.education),
-            'experience_count': len(resume_data.experience)
+            'experience_count': len(resume_data.experience),
+            'file_type': resume_data.file_type
         }
         
         df = pd.DataFrame([flattened_data])
@@ -373,43 +422,46 @@ def main():
     """Example usage of the ResumeParser"""
     parser = ResumeParser()
     
-    # Example usage
-    pdf_path = "sample_resume.pdf"  # Replace with your PDF path
+    # Example usage for both PDF and DOCX
+    file_paths = ["sample_resume.pdf", "sample_resume.docx"]  # Replace with your file paths
     
-    try:
-        # Parse the resume
-        resume_data = parser.parse_resume(pdf_path)
-        
-        # Print extracted information
-        print("\n" + "="*50)
-        print("RESUME PARSING RESULTS")
-        print("="*50)
-        
-        print(f"Name: {resume_data.name}")
-        print(f"Email: {resume_data.email}")
-        print(f"Phone: {resume_data.phone}")
-        print(f"LinkedIn: {resume_data.linkedin}")
-        print(f"GitHub: {resume_data.github}")
-        print(f"Portfolio: {resume_data.portfolio}")
-        
-        print(f"\nSkills ({len(resume_data.skills)}):")
-        for skill in resume_data.skills[:10]:  # Show first 10 skills
-            print(f"  - {skill}")
-        
-        print(f"\nEducation ({len(resume_data.education)}):")
-        for edu in resume_data.education:
-            print(f"  - {edu}")
-        
-        print(f"\nExperience ({len(resume_data.experience)}):")
-        for exp in resume_data.experience:
-            print(f"  - {exp}")
-        
-        # Save results
-        parser.save_to_json(resume_data, "parsed_resume.json")
-        parser.save_to_csv(resume_data, "parsed_resume.csv")
-        
-    except Exception as e:
-        logger.error(f"Error parsing resume: {e}")
+    for file_path in file_paths:
+        if os.path.exists(file_path):
+            try:
+                # Parse the resume
+                resume_data = parser.parse_resume(file_path)
+                
+                # Print extracted information
+                print("\n" + "="*50)
+                print(f"RESUME PARSING RESULTS - {resume_data.file_type.upper()}")
+                print("="*50)
+                
+                print(f"Name: {resume_data.name}")
+                print(f"Email: {resume_data.email}")
+                print(f"Phone: {resume_data.phone}")
+                print(f"LinkedIn: {resume_data.linkedin}")
+                print(f"GitHub: {resume_data.github}")
+                print(f"Portfolio: {resume_data.portfolio}")
+                
+                print(f"\nSkills ({len(resume_data.skills)}):")
+                for skill in resume_data.skills[:10]:  # Show first 10 skills
+                    print(f"  - {skill}")
+                
+                print(f"\nEducation ({len(resume_data.education)}):")
+                for edu in resume_data.education:
+                    print(f"  - {edu}")
+                
+                print(f"\nExperience ({len(resume_data.experience)}):")
+                for exp in resume_data.experience:
+                    print(f"  - {exp}")
+                
+                # Save results
+                base_name = os.path.splitext(file_path)[0]
+                parser.save_to_json(resume_data, f"{base_name}_parsed.json")
+                parser.save_to_csv(resume_data, f"{base_name}_parsed.csv")
+                
+            except Exception as e:
+                logger.error(f"Error parsing resume {file_path}: {e}")
 
 
 if __name__ == "__main__":

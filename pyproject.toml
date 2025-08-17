@@ -1,0 +1,7 @@
+[project]
+name = "interview-agent"
+version = "0.1.0"
+dependencies = []
+
+[tool.setuptools]
+packages = ["backend", "utils"]
